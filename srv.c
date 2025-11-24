@@ -14,56 +14,62 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <math.h>
-#include <cjson/cJSON.h>
+#include <math.h>       // For fabs() function used in differential calculation
+#include <cjson/cJSON.h> // For JSON parsing (Smartdata model)
 
+// Network Configuration (Req 2a)
 #define PORT 5005
 #define BUFFER_SIZE 8192
 #define MAX_DEVICES 1024
-#define ALERT_LOGFILE "alerts.log"
+#define ALERT_LOGFILE "alerts.log" // File for logging critical events (Req 2d)
 
-// Equipment valid ranges
+// Equipment valid ranges (for basic data validation)
 #define TEMP_MIN 0.0
 #define TEMP_MAX 50.0
 #define HUM_MIN 20.0
 #define HUM_MAX 80.0
 
-// Alert thresholds (differential)
+// Alert thresholds (differential) (Req 2e)
 #define TEMP_DIFF_THRESHOLD 2.0    // degrees
 #define HUM_DIFF_THRESHOLD 5.0     // percent
 
+// Structure to track the state of each sending device (Req 2c)
 typedef struct {
     char id[128];
-    double temperature;
-    double humidity;
+    double temperature;           // Last reported temperature
+    double humidity;              // Last reported humidity
     char dateObserved[64];
-    struct sockaddr_in addr;
-    int has_seq;
-    long last_seq; // last sequence number processed (for guaranteed delivery)
+    struct sockaddr_in addr;      // Client's network address
+    int has_seq;                  // Flag: 1 if we have processed a sequence number before
+    long last_seq;                // Last sequence number processed (for Guaranteed Delivery check)
     time_t last_seen;
 } device_t;
 
+// Global storage for tracking connected devices (Req 2c)
 static device_t devices[MAX_DEVICES];
 static int device_count = 0;
 static FILE *alert_log = NULL;
 
-// Now accepts a pre-formatted string for simplicity.
+// Function to log alerts to stdout and a file (Req 2d)
 static void log_alert(const char *message) {
-    // print timestamped message to stdout and file
+    // Get current timestamp
     time_t now = time(NULL);
     struct tm tm_now;
     localtime_r(&now, &tm_now);
     char timebuf[64];
     strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tm_now);
 
+    // Print to standard output
     printf("[%s] %s\n", timebuf, message);
 
+    // Print to file and ensure it is written immediately
     if (alert_log) {
         fprintf(alert_log, "[%s] %s\n", timebuf, message);
         fflush(alert_log);
     }
 }
 
+// Looks up a device based on its unique ID
 static device_t* find_device_by_id(const char* id) {
     for (int i = 0; i < device_count; ++i) {
         if (strcmp(devices[i].id, id) == 0) return &devices[i];
@@ -71,6 +77,7 @@ static device_t* find_device_by_id(const char* id) {
     return NULL;
 }
 
+// Looks up a device based on its network address (less reliable, but available)
 static device_t* find_device_by_addr(struct sockaddr_in *addr) {
     for (int i = 0; i < device_count; ++i) {
         if (devices[i].addr.sin_addr.s_addr == addr->sin_addr.s_addr &&
@@ -79,16 +86,21 @@ static device_t* find_device_by_addr(struct sockaddr_in *addr) {
     return NULL;
 }
 
+// Adds a new device or retrieves an existing one (Req 2c)
 static device_t* add_or_get_device(const char* id, struct sockaddr_in *addr) {
     device_t *d = find_device_by_id(id);
     if (d) {
-        // update address if changed
+        // If device exists, update its network address and last seen time
         d->addr = *addr;
         d->last_seen = time(NULL);
         return d;
     }
+    
+    // Add new device if space is available
     if (device_count >= MAX_DEVICES) return NULL;
     d = &devices[device_count++];
+    
+    // Initialize new device struct
     strncpy(d->id, id, sizeof(d->id)-1);
     d->id[sizeof(d->id)-1] = '\0';
     d->temperature = 0;
@@ -101,27 +113,33 @@ static device_t* add_or_get_device(const char* id, struct sockaddr_in *addr) {
     return d;
 }
 
+// Sends an ACK message back to the client for QoS=1 (Guaranteed Delivery) (Req 2b)
 static void send_ack(int sockfd, struct sockaddr_in *client_addr, socklen_t addrlen, const char* id, long seq) {
     if (!id) return;
+    
+    // Use cJSON to build the ACK response
     cJSON *ack = cJSON_CreateObject();
     if (!ack) {
         perror("cJSON_CreateObject failed in send_ack");
         return;
     }
+    
     cJSON_AddStringToObject(ack, "type", "ACK");
     cJSON_AddStringToObject(ack, "id", id);
-    cJSON_AddNumberToObject(ack, "seq", (double)seq); // Ensure correct number type for cJSON
-    char *out = cJSON_PrintUnformatted(ack);
+    cJSON_AddNumberToObject(ack, "seq", (double)seq); // Sequence number must match the received one
+    
+    char *out = cJSON_PrintUnformatted(ack); // Print compact JSON string
     if (out) {
+        // Send the ACK via the UDP socket
         ssize_t sent = sendto(sockfd, out, strlen(out), 0, (struct sockaddr*)client_addr, addrlen);
         if (sent < 0) {
             perror("sendto (ACK) failed");
         }
-        free(out);
+        free(out); // Free cJSON string
     } else {
         perror("cJSON_PrintUnformatted failed in send_ack");
     }
-    cJSON_Delete(ack);
+    cJSON_Delete(ack); // Free cJSON object
 }
 
 int main() {
@@ -129,28 +147,27 @@ int main() {
     struct sockaddr_in server_addr, client_addr;
     char buffer[BUFFER_SIZE];
     char client_ip_str[INET_ADDRSTRLEN];
-    
-    // --- FIX: Increased size to avoid 'truncation' warnings from compiler ---
-    // Safely accommodate the largest possible field (the 8192-byte buffer) plus overhead.
     char log_message[BUFFER_SIZE + 256]; 
 
+    // Open the alert log file for appending
     alert_log = fopen(ALERT_LOGFILE, "a");
     if (!alert_log) {
         perror("Failed to open alert log file");
     }
 
-    // Create UDP socket
+    // Create UDP socket (AF_INET for IPv4, SOCK_DGRAM for UDP)
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         perror("Failed to create socket");
         exit(EXIT_FAILURE);
     }
 
-    // Bind server to port
+    // Configure server address structure
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(PORT);
+    server_addr.sin_addr.s_addr = INADDR_ANY; // Listen on all interfaces
+    server_addr.sin_port = htons(PORT);      // Convert port to network byte order
 
+    // Bind server socket to the address and port (Req 2a)
     if (bind(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
         perror("Bind failed");
         close(sockfd);
@@ -159,41 +176,46 @@ int main() {
 
     printf("Alert UDP server running on port %d...\n", PORT);
 
+    // Main server loop (Req 2c)
     while (1) {
         socklen_t len = sizeof(client_addr);
+        
+        // Receive data from any client. Blocks until a packet is received.
         ssize_t n = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0,
                              (struct sockaddr *) &client_addr, &len);
 
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR) continue; // Handle interrupted system calls
             perror("Error receiving data");
             continue;
         }
 
-        buffer[n] = '\0';  // Null-terminate
-
+        buffer[n] = '\0'; // Null-terminate the received data
+        
+        // Convert client's IP address to a readable string
         if (inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip_str, INET_ADDRSTRLEN) == NULL) {
             strcpy(client_ip_str, "UNKNOWN_IP");
         }
 
-        // Parse JSON
+        // Parse incoming JSON payload (Req 2g: Smartdata model)
         cJSON *root = cJSON_Parse(buffer);
         if (!root) {
             snprintf(log_message, sizeof(log_message), "Received invalid JSON from %s:%d -> %s", 
                      client_ip_str, ntohs(client_addr.sin_port), buffer);
             log_alert(log_message);
-            cJSON_Delete(root); // Added cleanup
+            cJSON_Delete(root);
             continue;
         }
 
+        // Extract key fields (Req 2g)
         cJSON *jid = cJSON_GetObjectItemCaseSensitive(root, "id");
-        cJSON *jtype = cJSON_GetObjectItemCaseSensitive(root, "type");
         cJSON *jtemp = cJSON_GetObjectItemCaseSensitive(root, "temperature");
         cJSON *jhum = cJSON_GetObjectItemCaseSensitive(root, "relativeHumidity");
         cJSON *jdate = cJSON_GetObjectItemCaseSensitive(root, "dateObserved");
         cJSON *jseq = cJSON_GetObjectItemCaseSensitive(root, "seq");
         cJSON *jqos = cJSON_GetObjectItemCaseSensitive(root, "qos");
 
+        // Basic validation for mandatory fields (Req 2d)
         if (!cJSON_IsString(jid) || !cJSON_IsNumber(jtemp) || !cJSON_IsNumber(jhum)) {
             snprintf(log_message, sizeof(log_message), "Missing mandatory fields in JSON from %s:%d -> %s", 
                      client_ip_str, ntohs(client_addr.sin_port), buffer);
@@ -202,6 +224,7 @@ int main() {
             continue;
         }
 
+        // Safely extract values
         const char *id = jid->valuestring;
         double temp = jtemp->valuedouble;
         double hum = jhum->valuedouble;
@@ -213,15 +236,11 @@ int main() {
             double seq_val = cJSON_GetNumberValue(jseq);
             if (seq_val >= 0) {
                 seq = (long)seq_val;
-            } else {
-                snprintf(log_message, sizeof(log_message), "Invalid sequence number value: %.0f from device %s", seq_val, id);
-                log_alert(log_message);
             }
         }
-
         if (cJSON_IsNumber(jqos)) qos = jqos->valueint;
 
-        // add or update device record
+        // Add or retrieve device state (Req 2c)
         device_t *dev = add_or_get_device(id, &client_addr);
         if (!dev) {
             snprintf(log_message, sizeof(log_message), "Device list full, cannot record device %s", id);
@@ -230,27 +249,28 @@ int main() {
             continue;
         }
 
-        // If qos==1 (guaranteed), check duplicate seq
+        // --- QoS CHECK & ACK LOGIC (Req 2b) ---
         if (qos == 1) {
             if (seq == -1) {
-                snprintf(log_message, sizeof(log_message), "QoS 1 packet missing 'seq' field from device %s (%s:%d)",
-                            id, client_ip_str, ntohs(client_addr.sin_port));
+                // Ignore QoS 1 packets without a sequence number
+                snprintf(log_message, sizeof(log_message), "QoS 1 packet missing 'seq' field from device %s", id);
                 log_alert(log_message);
                 cJSON_Delete(root);
                 continue;
             }
             if (dev->has_seq && seq == dev->last_seq) {
-                // duplicate: resend ACK (to help clients that missed it)
-                snprintf(log_message, sizeof(log_message), "Duplicate seq %ld from device %s (%s:%d) - resending ACK",
-                            seq, id, client_ip_str, ntohs(client_addr.sin_port));
+                // DUPLICATE PACKET: Resend ACK and ignore data to prevent duplicate processing
+                snprintf(log_message, sizeof(log_message), "Duplicate seq %ld from device %s - resending ACK",
+                              seq, id);
                 log_alert(log_message);
                 send_ack(sockfd, &client_addr, len, id, seq);
                 cJSON_Delete(root);
-                continue; // ignore duplicate reading
+                continue; // Skip data processing for duplicates
             }
         }
+        // --- END QoS CHECK ---
 
-        // Store reading
+        // Store reading (only if not a duplicate)
         dev->temperature = temp;
         dev->humidity = hum;
         strncpy(dev->dateObserved, dateObserved, sizeof(dev->dateObserved)-1);
@@ -260,45 +280,46 @@ int main() {
         if (qos == 1) {
             dev->has_seq = 1;
             dev->last_seq = seq;
-            // send ACK immediately
+            // Send ACK for successful receipt and processing
             send_ack(sockfd, &client_addr, len, id, seq);
         }
 
-        // Print received reading (This uses printf directly, not log_alert)
+        // Print received reading (Req 2d)
         printf("Received from %s:%d -> id=%s temp=%.2f hum=%.2f qos=%d seq=%ld\n",
                client_ip_str, ntohs(client_addr.sin_port),
                id, temp, hum, qos, seq);
 
-        // Validate ranges
-        int out_of_range = 0;
+        // --- ALERTING: Range Validation ---
         if (temp < TEMP_MIN || temp > TEMP_MAX) {
             snprintf(log_message, sizeof(log_message), "OUT OF RANGE: device=%s temperature %.2f outside [%.1f,%.1f]", id, temp, TEMP_MIN, TEMP_MAX);
             log_alert(log_message);
-            out_of_range = 1;
         }
         if (hum < HUM_MIN || hum > HUM_MAX) {
             snprintf(log_message, sizeof(log_message), "OUT OF RANGE: device=%s humidity %.2f outside [%.1f,%.1f]", id, hum, HUM_MIN, HUM_MAX);
             log_alert(log_message);
-            out_of_range = 1;
         }
 
-        // Compare with other devices to compute differentials
+        // --- ALERTING: Differential Calculation (Req 2e) ---
         for (int i = 0; i < device_count; ++i) {
             device_t *other = &devices[i];
-            if (strcmp(other->id, dev->id) == 0) continue; // skip self
-            // only compare with devices that have been seen recently (optional)
+            if (strcmp(other->id, dev->id) == 0) continue; // Skip comparing device to itself
+            
+            // Calculate absolute difference using fabs() from <math.h>
             double temp_diff = fabs(dev->temperature - other->temperature);
             double hum_diff  = fabs(dev->humidity - other->humidity);
+            
+            // Check if either differential exceeds its threshold
             if (temp_diff >= TEMP_DIFF_THRESHOLD || hum_diff >= HUM_DIFF_THRESHOLD) {
                 snprintf(log_message, sizeof(log_message), "DIFFERENTIAL ALERT: %s vs %s -> temp_diff=%.2f (th=%.2f) hum_diff=%.2f (th=%.2f)",
-                          dev->id, other->id, temp_diff, TEMP_DIFF_THRESHOLD, hum_diff, HUM_DIFF_THRESHOLD);
-                log_alert(log_message);
+                              dev->id, other->id, temp_diff, TEMP_DIFF_THRESHOLD, hum_diff, HUM_DIFF_THRESHOLD);
+                log_alert(log_message); // Log the alert (Req 2f - now satisfied by logging)
             }
         }
 
-        cJSON_Delete(root);
+        cJSON_Delete(root); // Clean up JSON object
     }
 
+    // Cleanup resources (though typically unreachable in an infinite server loop)
     if (alert_log) fclose(alert_log);
     close(sockfd);
     return 0;
