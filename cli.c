@@ -1,8 +1,8 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <DHT.h>
-#include <ArduinoJson.h>
-#include <SPIFFS.h> 
+#include <DHT.h>		// DHT by Adafruit
+#include <ArduinoJson.h>	// ArduinoJson by Benoit
+#include <SPIFFS.h> 		
 #include <vector>   
 
 // ---------------- CONFIG ----------------
