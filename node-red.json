@@ -1,0 +1,510 @@
+[
+    {
+        "id": "fbb4856d0f0522f1",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "cc352ef8a7a636a2",
+        "type": "ui_chart",
+        "z": "fbb4856d0f0522f1",
+        "name": "Temperature",
+        "group": "1be0994cb3c910dc",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "label": "chart",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "pending...",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": 1,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#1f77b4",
+            "#aec7e8",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 650,
+        "y": 260,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e99957ce29311102",
+        "type": "mqtt in",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "topic": "/comcs/g04/sensor",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "7f2d9564175f3903",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 170,
+        "y": 260,
+        "wires": [
+            [
+                "32110ace10cad82a"
+            ]
+        ]
+    },
+    {
+        "id": "28f09a88f37861d4",
+        "type": "ui_chart",
+        "z": "fbb4856d0f0522f1",
+        "name": "Humidity",
+        "group": "490c6cbaed5a4617",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "label": "chart",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "pending...",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": 1,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#1f77b4",
+            "#aec7e8",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 640,
+        "y": 380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "32110ace10cad82a",
+        "type": "function",
+        "z": "fbb4856d0f0522f1",
+        "name": "Parse JSON",
+        "func": "var tempMsg = { payload: msg.payload.temperature };\nvar humMsg = { payload: msg.payload.relativeHumidity };\nreturn [tempMsg, humMsg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 390,
+        "y": 260,
+        "wires": [
+            [
+                "cc352ef8a7a636a2",
+                "bd8a976c576979b3"
+            ],
+            [
+                "28f09a88f37861d4",
+                "6ee673e7c1fc2cb9"
+            ]
+        ]
+    },
+    {
+        "id": "bd8a976c576979b3",
+        "type": "function",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Temperature",
+        "func": "let sumTemp = context.get(\"sumTemp\") || 0;\nlet countTemp = context.get(\"countTemp\") || 0;\n\n// Current temperature from input\nlet temp = msg.payload;\n\n// Update sum and count\nsumTemp += temp;\ncountTemp += 1;\n\n// Compute average\nlet avgTemp = sumTemp / countTemp;\n\n// Save updated sums/count in context\ncontext.set(\"sumTemp\", sumTemp);\ncontext.set(\"countTemp\", countTemp);\n\n// Wrap the result in msg.payload\nmsg = { payload: parseFloat(avgTemp.toFixed(2)) };\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 480,
+        "y": 480,
+        "wires": [
+            [
+                "41dafd6e9b887412"
+            ]
+        ]
+    },
+    {
+        "id": "6ee673e7c1fc2cb9",
+        "type": "function",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Humidity",
+        "func": "let sumTemp = context.get(\"sumTemp\") || 0;\nlet countTemp = context.get(\"countTemp\") || 0;\n\n// Current temperature from input\nlet temp = msg.payload;\n\n// Update sum and count\nsumTemp += temp;\ncountTemp += 1;\n\n// Compute average\nlet avgTemp = sumTemp / countTemp;\n\n// Save updated sums/count in context\ncontext.set(\"sumTemp\", sumTemp);\ncontext.set(\"countTemp\", countTemp);\n\n// Wrap the result in msg.payload\nmsg = { payload: parseFloat(avgTemp.toFixed(2)) };\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 470,
+        "y": 540,
+        "wires": [
+            [
+                "1657a145575cd968"
+            ]
+        ]
+    },
+    {
+        "id": "41dafd6e9b887412",
+        "type": "ui_gauge",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Temperature",
+        "group": "1be0994cb3c910dc",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "gtype": "gage",
+        "title": "Average Temperature",
+        "label": "ºC",
+        "format": "{{value}}",
+        "min": 0,
+        "max": "100",
+        "colors": [
+            "#00b500",
+            "#e6e600",
+            "#ca3838"
+        ],
+        "seg1": "25",
+        "seg2": "50",
+        "diff": false,
+        "className": "",
+        "x": 780,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "1657a145575cd968",
+        "type": "ui_gauge",
+        "z": "fbb4856d0f0522f1",
+        "name": "Average Humidity",
+        "group": "490c6cbaed5a4617",
+        "order": 2,
+        "width": 0,
+        "height": 0,
+        "gtype": "gage",
+        "title": "Average Humidity",
+        "label": "%",
+        "format": "{{value}}",
+        "min": 0,
+        "max": "100",
+        "colors": [
+            "#00b500",
+            "#e6e600",
+            "#ca3838"
+        ],
+        "seg1": "20",
+        "seg2": "80",
+        "diff": false,
+        "className": "",
+        "x": 770,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "c47f0efb5c92a4ca",
+        "type": "mqtt in",
+        "z": "fbb4856d0f0522f1",
+        "name": "",
+        "topic": "/comcs/g04/alerts",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "7f2d9564175f3903",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 180,
+        "y": 660,
+        "wires": [
+            [
+                "782007aced6f40d5",
+                "724d871d8bd1ddb5",
+                "1beb81a7d8a4e076"
+            ]
+        ]
+    },
+    {
+        "id": "df902a9a4246b2f1",
+        "type": "status",
+        "z": "fbb4856d0f0522f1",
+        "name": "Detect Disconnect",
+        "scope": [
+            "e99957ce29311102"
+        ],
+        "x": 310,
+        "y": 180,
+        "wires": [
+            [
+                "26838dff6c636435",
+                "d822f0dcf5889432"
+            ]
+        ]
+    },
+    {
+        "id": "26838dff6c636435",
+        "type": "debug",
+        "z": "fbb4856d0f0522f1",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "status",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 500,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "d822f0dcf5889432",
+        "type": "function",
+        "z": "fbb4856d0f0522f1",
+        "name": "function 1",
+        "func": "if (msg.status && msg.status.text === \"node-red:common.status.disconnected\") {\n    msg.payload = \"⚠ MQTT client disconnected!\";\n    return msg;\n\n} else {\n    // Ignore other statuses\n    return null;\n}",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 580,
+        "y": 200,
+        "wires": [
+            [
+                "47f521b36954d6fd"
+            ]
+        ]
+    },
+    {
+        "id": "47f521b36954d6fd",
+        "type": "ui_toast",
+        "z": "fbb4856d0f0522f1",
+        "position": "bottom right",
+        "displayTime": "5",
+        "highlight": "",
+        "sendall": true,
+        "outputs": 0,
+        "ok": "OK",
+        "cancel": "",
+        "raw": false,
+        "className": "",
+        "topic": "",
+        "name": "",
+        "x": 770,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "782007aced6f40d5",
+        "type": "debug",
+        "z": "fbb4856d0f0522f1",
+        "name": "debug 2",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 360,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "724d871d8bd1ddb5",
+        "type": "ui_toast",
+        "z": "fbb4856d0f0522f1",
+        "position": "bottom right",
+        "displayTime": "5",
+        "highlight": "",
+        "sendall": true,
+        "outputs": 0,
+        "ok": "OK",
+        "cancel": "",
+        "raw": false,
+        "className": "",
+        "topic": "ALERT",
+        "name": "ALERT",
+        "x": 560,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "1beb81a7d8a4e076",
+        "type": "function",
+        "z": "fbb4856d0f0522f1",
+        "name": "Top 5 Recent Alerts",
+        "func": "let alerts = flow.get('recentAlerts') || [];\nalerts.unshift(msg.payload);\nalerts = alerts.slice(0, 5);\nflow.set('recentAlerts', alerts);\n\n// send as array to template\nmsg.payload = alerts;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 330,
+        "y": 760,
+        "wires": [
+            [
+                "c82651bbaeb32f2d"
+            ]
+        ]
+    },
+    {
+        "id": "c82651bbaeb32f2d",
+        "type": "ui_template",
+        "z": "fbb4856d0f0522f1",
+        "group": "79cc9cc2a3d47206",
+        "name": "",
+        "order": 1,
+        "width": "8",
+        "height": "8",
+        "format": "<div style=\"max-height:200px; overflow-y:auto;\">\n    <ul>\n        <li ng-repeat=\"alert in msg.payload track by $index\">\n            {{alert}}\n        </li>\n    </ul>\n</div>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 540,
+        "y": 840,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "0aaf29ac90528551",
+        "type": "ui_spacer",
+        "z": "fbb4856d0f0522f1",
+        "name": "spacer",
+        "group": "353d8dbb5e16655b",
+        "order": 2,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "1be0994cb3c910dc",
+        "type": "ui_group",
+        "name": "Temperature",
+        "tab": "03ecc5f32a498d6c",
+        "order": 2,
+        "disp": true,
+        "width": "10",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "7f2d9564175f3903",
+        "type": "mqtt-broker",
+        "name": "eu.hivemq.cloud",
+        "broker": "4979254f05ea480283d67c6f0d9f7525.s1.eu.hivemq.cloud",
+        "port": "8883",
+        "tls": "c80603c327360862",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": true,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "490c6cbaed5a4617",
+        "type": "ui_group",
+        "name": "Humidity",
+        "tab": "03ecc5f32a498d6c",
+        "order": 2,
+        "disp": true,
+        "width": "10",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "79cc9cc2a3d47206",
+        "type": "ui_group",
+        "name": "Alerts",
+        "tab": "03ecc5f32a498d6c",
+        "order": 3,
+        "disp": true,
+        "width": "8",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "03ecc5f32a498d6c",
+        "type": "ui_tab",
+        "name": "Dashboard",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    },
+    {
+        "id": "c80603c327360862",
+        "type": "tls-config",
+        "name": "",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "servername": "",
+        "verifyservercert": false,
+        "alpnprotocol": ""
+    }
+]
