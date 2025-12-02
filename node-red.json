@@ -16,7 +16,7 @@
         "order": 1,
         "width": 0,
         "height": 0,
-        "label": "chart",
+        "label": "",
         "chartType": "line",
         "legend": "false",
         "xformat": "HH:mm:ss",
@@ -44,7 +44,7 @@
         ],
         "outputs": 1,
         "useDifferentColor": false,
-        "className": "",
+        "className": "temp_chart",
         "x": 650,
         "y": 260,
         "wires": [
@@ -81,7 +81,7 @@
         "order": 1,
         "width": 0,
         "height": 0,
-        "label": "chart",
+        "label": "",
         "chartType": "line",
         "legend": "false",
         "xformat": "HH:mm:ss",
@@ -255,8 +255,8 @@
         "wires": [
             [
                 "782007aced6f40d5",
-                "724d871d8bd1ddb5",
-                "1beb81a7d8a4e076"
+                "1beb81a7d8a4e076",
+                "3627ccb86a53e88d"
             ]
         ]
     },
@@ -353,27 +353,29 @@
         "id": "724d871d8bd1ddb5",
         "type": "ui_toast",
         "z": "fbb4856d0f0522f1",
-        "position": "bottom right",
+        "position": "dialog",
         "displayTime": "5",
         "highlight": "",
         "sendall": true,
-        "outputs": 0,
+        "outputs": 1,
         "ok": "OK",
         "cancel": "",
-        "raw": false,
+        "raw": true,
         "className": "",
         "topic": "ALERT",
-        "name": "ALERT",
-        "x": 560,
+        "name": "alert",
+        "x": 550,
         "y": 660,
-        "wires": []
+        "wires": [
+            []
+        ]
     },
     {
         "id": "1beb81a7d8a4e076",
         "type": "function",
         "z": "fbb4856d0f0522f1",
         "name": "Top 5 Recent Alerts",
-        "func": "let alerts = flow.get('recentAlerts') || [];\nalerts.unshift(msg.payload);\nalerts = alerts.slice(0, 5);\nflow.set('recentAlerts', alerts);\n\n// send as array to template\nmsg.payload = alerts;\nreturn msg;\n",
+        "func": "if (msg.payload === \"clearAlerts\") {\n    flow.set('recentAlerts', []);\n    msg.payload = [];\n    return msg;\n}\n\nlet alerts = flow.get('recentAlerts') || [];\n\nalerts.unshift(msg.payload);\n\n// keep last 10\nalerts = alerts.slice(0, 10);\n\nflow.set('recentAlerts', alerts);\n\nmsg.payload = alerts;\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -394,30 +396,68 @@
         "z": "fbb4856d0f0522f1",
         "group": "79cc9cc2a3d47206",
         "name": "",
-        "order": 1,
-        "width": "8",
-        "height": "8",
-        "format": "<div style=\"max-height:200px; overflow-y:auto;\">\n    <ul>\n        <li ng-repeat=\"alert in msg.payload track by $index\">\n            {{alert}}\n        </li>\n    </ul>\n</div>",
+        "order": 3,
+        "width": "10",
+        "height": "11",
+        "format": "<div class=\"alert-container\">\n    <ul class=\"alert-list\">\n        <li class=\"alert-item\" ng-repeat=\"alert in msg.payload track by $index\">\n            <span class=\"alert-index\">#{{$index + 1}}</span>\n\n            <div class=\"alert-content\">\n                <div class=\"alert-title\">\n                    <b>{{alert.device}}</b> | <span>{{alert.alertType}}</span>\n                </div>\n                <div class=\"alert-message\">\n                    {{alert.message}}\n                </div>\n            </div>\n        </li>\n    </ul>\n</div>\n\n<style>\n    .alert-container {\n        max-height: 600px;\n        overflow-y: auto;\n        padding: 10px;\n        background: #333333;\n        border-radius: 8px;\n        border: 1px solid #333333;\n        font-family: Arial, sans-serif;\n    }\n\n    .alert-list {\n        margin: 0;\n        padding: 0;\n        list-style: none;\n    }\n\n    .alert-item {\n        background: #ffffff;\n        margin-bottom: 8px;\n        padding: 10px;\n        border-radius: 6px;\n        border-left: 5px solid #6db046;\n        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);\n        display: flex;\n        align-items: flex-start;\n        gap: 12px;\n    }\n\n    .alert-index {\n        font-weight: bold;\n        color: #555;\n    }\n\n    .alert-content {\n        flex: 1;\n    }\n\n    .alert-title {\n        font-size: 14px;\n        margin-bottom: 4px;\n        color: #222;\n    }\n\n    .alert-message {\n        color: #333;\n        font-size: 13px;\n        white-space: normal;\n        word-break: break-word;\n    }\n</style>",
         "storeOutMessages": true,
         "fwdInMessages": true,
         "resendOnRefresh": true,
         "templateScope": "local",
         "className": "",
-        "x": 540,
+        "x": 560,
         "y": 840,
         "wires": [
             []
         ]
     },
     {
-        "id": "0aaf29ac90528551",
-        "type": "ui_spacer",
+        "id": "fbe346f31e0b821b",
+        "type": "ui_button",
         "z": "fbb4856d0f0522f1",
-        "name": "spacer",
-        "group": "353d8dbb5e16655b",
-        "order": 2,
-        "width": 1,
-        "height": 1
+        "name": "",
+        "group": "79cc9cc2a3d47206",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "passthru": false,
+        "label": "Clear Alerts",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "",
+        "payload": "clearAlerts",
+        "payloadType": "str",
+        "topic": "topic",
+        "topicType": "msg",
+        "x": 330,
+        "y": 940,
+        "wires": [
+            [
+                "1beb81a7d8a4e076"
+            ]
+        ]
+    },
+    {
+        "id": "3627ccb86a53e88d",
+        "type": "function",
+        "z": "fbb4856d0f0522f1",
+        "name": "function 2",
+        "func": "let p = msg.payload;\n\nmsg.payload =\n    `<b>Device:</b> ${p.device}<br>\n<b>Type:</b> ${p.alertType}<br>\n<b>Message:</b> ${p.message}`;\n\nmsg.payload = msg.payload;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 680,
+        "wires": [
+            [
+                "724d871d8bd1ddb5"
+            ]
+        ]
     },
     {
         "id": "1be0994cb3c910dc",
@@ -477,10 +517,10 @@
         "id": "79cc9cc2a3d47206",
         "type": "ui_group",
         "name": "Alerts",
-        "tab": "03ecc5f32a498d6c",
+        "tab": "7773c87f06bd908b",
         "order": 3,
         "disp": true,
-        "width": "8",
+        "width": "10",
         "collapse": false,
         "className": ""
     },
@@ -488,7 +528,7 @@
         "id": "03ecc5f32a498d6c",
         "type": "ui_tab",
         "name": "Dashboard",
-        "icon": "dashboard",
+        "icon": "device_hub",
         "order": 1,
         "disabled": false,
         "hidden": false
@@ -506,5 +546,14 @@
         "servername": "",
         "verifyservercert": false,
         "alpnprotocol": ""
+    },
+    {
+        "id": "7773c87f06bd908b",
+        "type": "ui_tab",
+        "name": "Alerts",
+        "icon": "warning",
+        "order": 2,
+        "disabled": false,
+        "hidden": false
     }
 ]
