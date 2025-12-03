@@ -33,6 +33,11 @@ const int mqtt_port = 8883; // Secure MQTT port
 #define INITIAL_BACKOFF_MS 200
 const char *log_filepath = "/telemetry_log.txt";
 const char *DEVICE_ID = "ESP32_Device_01";
+// --- ADAPTIVE THROTTLING CONFIG ---
+#define BASE_DELAY_MS 5000
+#define MAX_DELAY_MS 60000 // Cap generation delay at 60 seconds
+#define THROTTLING_THRESHOLD 10 // Start throttling if backlog exceeds 10 packets
+#define THROTTLING_FACTOR 2000 // Increase delay by 2 seconds per packet over threshold
 // ----------------------------
 
 DHT dht(DHTPIN, DHTTYPE);
@@ -43,6 +48,9 @@ PubSubClient client(espClient); // MQTT Client using secure WiFiClient
 
 unsigned long seq = 0; // Sequence number for guaranteed delivery
 int qos = 1;           // 0 = best effort, 1 = guaranteed delivery
+
+// NEW: Global variable for dynamic loop delay
+unsigned long current_delay = BASE_DELAY_MS; 
 
 // Forward declaration
 bool sendWithQoS(const String &payload, unsigned long current_seq);
@@ -201,6 +209,8 @@ void transmitStoredData()
     if (!file)
     {
         Serial.println("No existing telemetry log file found.");
+        // If file doesn't exist, backlog is zero, reset delay
+        current_delay = BASE_DELAY_MS; 
         return;
     }
 
@@ -243,6 +253,37 @@ void transmitStoredData()
     }
 
     file.close();
+    
+    // --- ADAPTIVE THROTTLING LOGIC ---
+    int backlog_count = failed_messages.size();
+
+    if (backlog_count > THROTTLING_THRESHOLD) {
+        // Calculate new delay based on backlog size
+        unsigned long throttle_increase = (backlog_count - THROTTLING_THRESHOLD) * THROTTLING_FACTOR;
+        current_delay = BASE_DELAY_MS + throttle_increase;
+        
+        // Cap the delay
+        if (current_delay > MAX_DELAY_MS) {
+            current_delay = MAX_DELAY_MS;
+        }
+        
+        Serial.print("CONGESTION DETECTED: Backlog=");
+        Serial.print(backlog_count);
+        Serial.print(". New generation delay: ");
+        Serial.print(current_delay / 1000);
+        Serial.println("s.");
+
+    } else {
+        // If backlog is low, reset to base delay
+        current_delay = BASE_DELAY_MS;
+        if (backlog_count > 0) {
+            Serial.print("Backlog clearing: ");
+            Serial.print(backlog_count);
+            Serial.println(" remaining. Resetting delay.");
+        }
+    }
+    // --- END ADAPTIVE THROTTLING ---
+
 
     // ----------------------------------------------------------------------
     // Rolling Window Logic: Rewrite the log file with only the failed messages
@@ -250,10 +291,7 @@ void transmitStoredData()
 
     if (count > 0)
     {
-        Serial.print("Finished processing ");
-        Serial.print(count);
-        Serial.println(" stored messages.");
-
+        // Only rewrite if there were items to process
         if (failed_messages.empty())
         {
             // All messages sent successfully, delete the file.
@@ -326,6 +364,10 @@ void callback(char *topic, byte *payload, unsigned int length)
 //------------------------------
 void publishMessage(const char *topic, const String &payload, boolean retained)
 {
+<<<<<<< HEAD
+=======
+    // Use payload.c_str() for publishing
+>>>>>>> ed9e882 (Throttling QoS)
     if (client.publish(topic, payload.c_str(), retained))
     {
         Serial.println("JSON published to " + String(topic));
@@ -380,10 +422,13 @@ void setup()
 
     udp.begin(udp_port);
     dht.begin();
+<<<<<<< HEAD
 
     // 2. Transmit stored data on restart
     // Moved to normal loop after finalization, block kept for testing purposes
     // transmitStoredData();
+=======
+>>>>>>> ed9e882 (Throttling QoS)
 }
 
 void loop()
@@ -407,12 +452,17 @@ void loop()
     }
 
     // 2. Build JSON payload
+<<<<<<< HEAD
     JsonDocument doc;
+=======
+    JsonDocument doc; 
+>>>>>>> ed9e882 (Throttling QoS)
     doc["id"] = DEVICE_ID;
     doc["type"] = "WeatherObserved";
     doc["temperature"] = temp;
     doc["relativeHumidity"] = hum;
     doc["dateObserved"] = millis(); // Using internal time for simplicity
+    doc["status"] = "OPERATIONAL"; // Simple QoS Flag
     doc["qos"] = qos;
     doc["seq"] = seq;
 
@@ -423,22 +473,34 @@ void loop()
     bool delivered = sendWithQoS(payload, seq);
 
     // 4. Publish via MQTT for command center visibility
+<<<<<<< HEAD
     publishMessage("/comcs/g04/sensor", payload, true);
 
+=======
+    publishMessage("/comcs/g04/sensor", payload, true); 
+    
+>>>>>>> ed9e882 (Throttling QoS)
     // 5. Handle failure by logging to file (Req. a)
     if (!delivered)
     {
         logDataToFile(payload);
+<<<<<<< HEAD
     }
     else
     {
         // Attempt to send stored data, since it is expected that the
         // server can now receive and reply
         transmitStoredData();
+=======
+>>>>>>> ed9e882 (Throttling QoS)
     }
-
-    // 6. Update sequence number
+    
+    // 6. Attempt to clear backlog and update throttling rate
+    transmitStoredData();
+    
+    // 7. Update sequence number
     seq++;
 
-    delay(5000); // Wait 5 seconds before the next observation
+    // 8. Adaptive Delay based on current congestion
+    delay(current_delay); 
 }
