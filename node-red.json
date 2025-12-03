@@ -1,6 +1,6 @@
 [
     {
-        "id": "fbb4856d0f0522f1",
+        "id": "a6172c7e4dac59d9",
         "type": "tab",
         "label": "Flow 1",
         "disabled": false,
@@ -8,15 +8,15 @@
         "env": []
     },
     {
-        "id": "cc352ef8a7a636a2",
+        "id": "bc85a9190c3d3e57",
         "type": "ui_chart",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Temperature",
         "group": "1be0994cb3c910dc",
         "order": 1,
         "width": 0,
         "height": 0,
-        "label": "",
+        "label": "Temperature (ºC)",
         "chartType": "line",
         "legend": "false",
         "xformat": "HH:mm:ss",
@@ -45,16 +45,16 @@
         "outputs": 1,
         "useDifferentColor": false,
         "className": "temp_chart",
-        "x": 650,
+        "x": 690,
         "y": 260,
         "wires": [
             []
         ]
     },
     {
-        "id": "e99957ce29311102",
+        "id": "0700663bc3f35628",
         "type": "mqtt in",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "",
         "topic": "/comcs/g04/sensor",
         "qos": "2",
@@ -64,24 +64,25 @@
         "rap": true,
         "rh": 0,
         "inputs": 0,
-        "x": 170,
-        "y": 260,
+        "x": 90,
+        "y": 280,
         "wires": [
             [
-                "32110ace10cad82a"
+                "803455e33daad870",
+                "2b33b4f27043420a"
             ]
         ]
     },
     {
-        "id": "28f09a88f37861d4",
+        "id": "1a855e2f20f1ea2a",
         "type": "ui_chart",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Humidity",
         "group": "490c6cbaed5a4617",
         "order": 1,
         "width": 0,
         "height": 0,
-        "label": "",
+        "label": "Humidity (%)",
         "chartType": "line",
         "legend": "false",
         "xformat": "HH:mm:ss",
@@ -110,41 +111,41 @@
         "outputs": 1,
         "useDifferentColor": false,
         "className": "",
-        "x": 640,
+        "x": 680,
         "y": 380,
         "wires": [
             []
         ]
     },
     {
-        "id": "32110ace10cad82a",
+        "id": "803455e33daad870",
         "type": "function",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Parse JSON",
-        "func": "var tempMsg = { payload: msg.payload.temperature };\nvar humMsg = { payload: msg.payload.relativeHumidity };\nreturn [tempMsg, humMsg];",
+        "func": "let device = msg.payload.id;  // \"ESP32\" or \"PICO\"\nlet temp = msg.payload.temperature;\nlet hum = msg.payload.relativeHumidity;\n\n// Create messages with device info as topic\nlet tempMsg = { payload: temp, topic: device };\nlet humMsg = { payload: hum, topic: device };\n\n// Send to the two outputs\nreturn [tempMsg, humMsg];\n",
         "outputs": 2,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 390,
-        "y": 260,
+        "x": 310,
+        "y": 280,
         "wires": [
             [
-                "cc352ef8a7a636a2",
-                "bd8a976c576979b3"
+                "6d08882f706e2a36",
+                "bc85a9190c3d3e57"
             ],
             [
-                "28f09a88f37861d4",
-                "6ee673e7c1fc2cb9"
+                "5a3a033e432856a3",
+                "1a855e2f20f1ea2a"
             ]
         ]
     },
     {
-        "id": "bd8a976c576979b3",
+        "id": "6d08882f706e2a36",
         "type": "function",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Average Temperature",
         "func": "let sumTemp = context.get(\"sumTemp\") || 0;\nlet countTemp = context.get(\"countTemp\") || 0;\n\n// Current temperature from input\nlet temp = msg.payload;\n\n// Update sum and count\nsumTemp += temp;\ncountTemp += 1;\n\n// Compute average\nlet avgTemp = sumTemp / countTemp;\n\n// Save updated sums/count in context\ncontext.set(\"sumTemp\", sumTemp);\ncontext.set(\"countTemp\", countTemp);\n\n// Wrap the result in msg.payload\nmsg = { payload: parseFloat(avgTemp.toFixed(2)) };\n\nreturn msg;\n",
         "outputs": 1,
@@ -153,18 +154,18 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 480,
-        "y": 480,
+        "x": 540,
+        "y": 440,
         "wires": [
             [
-                "41dafd6e9b887412"
+                "1f9eb0191c1529a8"
             ]
         ]
     },
     {
-        "id": "6ee673e7c1fc2cb9",
+        "id": "5a3a033e432856a3",
         "type": "function",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Average Humidity",
         "func": "let sumTemp = context.get(\"sumTemp\") || 0;\nlet countTemp = context.get(\"countTemp\") || 0;\n\n// Current temperature from input\nlet temp = msg.payload;\n\n// Update sum and count\nsumTemp += temp;\ncountTemp += 1;\n\n// Compute average\nlet avgTemp = sumTemp / countTemp;\n\n// Save updated sums/count in context\ncontext.set(\"sumTemp\", sumTemp);\ncontext.set(\"countTemp\", countTemp);\n\n// Wrap the result in msg.payload\nmsg = { payload: parseFloat(avgTemp.toFixed(2)) };\n\nreturn msg;\n",
         "outputs": 1,
@@ -173,21 +174,21 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 470,
-        "y": 540,
+        "x": 510,
+        "y": 500,
         "wires": [
             [
-                "1657a145575cd968"
+                "fc3c30392d26f8c3"
             ]
         ]
     },
     {
-        "id": "41dafd6e9b887412",
+        "id": "1f9eb0191c1529a8",
         "type": "ui_gauge",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Average Temperature",
         "group": "1be0994cb3c910dc",
-        "order": 1,
+        "order": 2,
         "width": 0,
         "height": 0,
         "gtype": "gage",
@@ -210,9 +211,9 @@
         "wires": []
     },
     {
-        "id": "1657a145575cd968",
+        "id": "fc3c30392d26f8c3",
         "type": "ui_gauge",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Average Humidity",
         "group": "490c6cbaed5a4617",
         "order": 2,
@@ -238,9 +239,9 @@
         "wires": []
     },
     {
-        "id": "c47f0efb5c92a4ca",
+        "id": "d686cd2311d714af",
         "type": "mqtt in",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "",
         "topic": "/comcs/g04/alerts",
         "qos": "2",
@@ -254,95 +255,23 @@
         "y": 660,
         "wires": [
             [
-                "782007aced6f40d5",
-                "1beb81a7d8a4e076",
-                "3627ccb86a53e88d"
+                "c327973f70a53258",
+                "4598736d100917b0",
+                "d7f8a35a27c4ce1b"
             ]
         ]
     },
     {
-        "id": "df902a9a4246b2f1",
-        "type": "status",
-        "z": "fbb4856d0f0522f1",
-        "name": "Detect Disconnect",
-        "scope": [
-            "e99957ce29311102"
-        ],
-        "x": 310,
-        "y": 180,
-        "wires": [
-            [
-                "26838dff6c636435",
-                "d822f0dcf5889432"
-            ]
-        ]
-    },
-    {
-        "id": "26838dff6c636435",
+        "id": "c327973f70a53258",
         "type": "debug",
-        "z": "fbb4856d0f0522f1",
-        "name": "debug 1",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "status",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 500,
-        "y": 160,
-        "wires": []
-    },
-    {
-        "id": "d822f0dcf5889432",
-        "type": "function",
-        "z": "fbb4856d0f0522f1",
-        "name": "function 1",
-        "func": "if (msg.status && msg.status.text === \"node-red:common.status.disconnected\") {\n    msg.payload = \"⚠ MQTT client disconnected!\";\n    return msg;\n\n} else {\n    // Ignore other statuses\n    return null;\n}",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 580,
-        "y": 200,
-        "wires": [
-            [
-                "47f521b36954d6fd"
-            ]
-        ]
-    },
-    {
-        "id": "47f521b36954d6fd",
-        "type": "ui_toast",
-        "z": "fbb4856d0f0522f1",
-        "position": "bottom right",
-        "displayTime": "5",
-        "highlight": "",
-        "sendall": true,
-        "outputs": 0,
-        "ok": "OK",
-        "cancel": "",
-        "raw": false,
-        "className": "",
-        "topic": "",
-        "name": "",
-        "x": 770,
-        "y": 200,
-        "wires": []
-    },
-    {
-        "id": "782007aced6f40d5",
-        "type": "debug",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "debug 2",
         "active": true,
         "tosidebar": true,
         "console": false,
         "tostatus": false,
-        "complete": "false",
+        "complete": "payload",
+        "targetType": "msg",
         "statusVal": "",
         "statusType": "auto",
         "x": 360,
@@ -350,14 +279,14 @@
         "wires": []
     },
     {
-        "id": "724d871d8bd1ddb5",
+        "id": "ac4d1db54ef1d36a",
         "type": "ui_toast",
-        "z": "fbb4856d0f0522f1",
-        "position": "dialog",
+        "z": "a6172c7e4dac59d9",
+        "position": "bottom right",
         "displayTime": "5",
         "highlight": "",
         "sendall": true,
-        "outputs": 1,
+        "outputs": 0,
         "ok": "OK",
         "cancel": "",
         "raw": true,
@@ -366,14 +295,12 @@
         "name": "alert",
         "x": 550,
         "y": 660,
-        "wires": [
-            []
-        ]
+        "wires": []
     },
     {
-        "id": "1beb81a7d8a4e076",
+        "id": "4598736d100917b0",
         "type": "function",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "Top 5 Recent Alerts",
         "func": "if (msg.payload === \"clearAlerts\") {\n    flow.set('recentAlerts', []);\n    msg.payload = [];\n    return msg;\n}\n\nlet alerts = flow.get('recentAlerts') || [];\n\nalerts.unshift(msg.payload);\n\n// keep last 10\nalerts = alerts.slice(0, 10);\n\nflow.set('recentAlerts', alerts);\n\nmsg.payload = alerts;\nreturn msg;",
         "outputs": 1,
@@ -386,19 +313,19 @@
         "y": 760,
         "wires": [
             [
-                "c82651bbaeb32f2d"
+                "18dee70144883a68"
             ]
         ]
     },
     {
-        "id": "c82651bbaeb32f2d",
+        "id": "18dee70144883a68",
         "type": "ui_template",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "group": "79cc9cc2a3d47206",
         "name": "",
         "order": 3,
-        "width": "10",
-        "height": "11",
+        "width": "11",
+        "height": "12",
         "format": "<div class=\"alert-container\">\n    <ul class=\"alert-list\">\n        <li class=\"alert-item\" ng-repeat=\"alert in msg.payload track by $index\">\n            <span class=\"alert-index\">#{{$index + 1}}</span>\n\n            <div class=\"alert-content\">\n                <div class=\"alert-title\">\n                    <b>{{alert.device}}</b> | <span>{{alert.alertType}}</span>\n                </div>\n                <div class=\"alert-message\">\n                    {{alert.message}}\n                </div>\n            </div>\n        </li>\n    </ul>\n</div>\n\n<style>\n    .alert-container {\n        max-height: 600px;\n        overflow-y: auto;\n        padding: 10px;\n        background: #333333;\n        border-radius: 8px;\n        border: 1px solid #333333;\n        font-family: Arial, sans-serif;\n    }\n\n    .alert-list {\n        margin: 0;\n        padding: 0;\n        list-style: none;\n    }\n\n    .alert-item {\n        background: #ffffff;\n        margin-bottom: 8px;\n        padding: 10px;\n        border-radius: 6px;\n        border-left: 5px solid #6db046;\n        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);\n        display: flex;\n        align-items: flex-start;\n        gap: 12px;\n    }\n\n    .alert-index {\n        font-weight: bold;\n        color: #555;\n    }\n\n    .alert-content {\n        flex: 1;\n    }\n\n    .alert-title {\n        font-size: 14px;\n        margin-bottom: 4px;\n        color: #222;\n    }\n\n    .alert-message {\n        color: #333;\n        font-size: 13px;\n        white-space: normal;\n        word-break: break-word;\n    }\n</style>",
         "storeOutMessages": true,
         "fwdInMessages": true,
@@ -412,9 +339,9 @@
         ]
     },
     {
-        "id": "fbe346f31e0b821b",
+        "id": "7c8ee10f35bb8d59",
         "type": "ui_button",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "",
         "group": "79cc9cc2a3d47206",
         "order": 1,
@@ -435,14 +362,14 @@
         "y": 940,
         "wires": [
             [
-                "1beb81a7d8a4e076"
+                "4598736d100917b0"
             ]
         ]
     },
     {
-        "id": "3627ccb86a53e88d",
+        "id": "d7f8a35a27c4ce1b",
         "type": "function",
-        "z": "fbb4856d0f0522f1",
+        "z": "a6172c7e4dac59d9",
         "name": "function 2",
         "func": "let p = msg.payload;\n\nmsg.payload =\n    `<b>Device:</b> ${p.device}<br>\n<b>Type:</b> ${p.alertType}<br>\n<b>Message:</b> ${p.message}`;\n\nmsg.payload = msg.payload;\nreturn msg;",
         "outputs": 1,
@@ -455,9 +382,26 @@
         "y": 680,
         "wires": [
             [
-                "724d871d8bd1ddb5"
+                "ac4d1db54ef1d36a"
             ]
         ]
+    },
+    {
+        "id": "2b33b4f27043420a",
+        "type": "debug",
+        "z": "a6172c7e4dac59d9",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 280,
+        "y": 220,
+        "wires": []
     },
     {
         "id": "1be0994cb3c910dc",
@@ -465,8 +409,8 @@
         "name": "Temperature",
         "tab": "03ecc5f32a498d6c",
         "order": 2,
-        "disp": true,
-        "width": "10",
+        "disp": false,
+        "width": "11",
         "collapse": false,
         "className": ""
     },
@@ -508,8 +452,8 @@
         "name": "Humidity",
         "tab": "03ecc5f32a498d6c",
         "order": 2,
-        "disp": true,
-        "width": "10",
+        "disp": false,
+        "width": "11",
         "collapse": false,
         "className": ""
     },
@@ -519,8 +463,8 @@
         "name": "Alerts",
         "tab": "7773c87f06bd908b",
         "order": 3,
-        "disp": true,
-        "width": "10",
+        "disp": false,
+        "width": "11",
         "collapse": false,
         "className": ""
     },

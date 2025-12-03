@@ -4,16 +4,16 @@
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <DHT.h>          // DHT by Adafruit
-#include <ArduinoJson.h>  // ArduinoJson by Benoit
-#include <SPIFFS.h>       // File system for ESP32
+#include <DHT.h>         // DHT by Adafruit
+#include <ArduinoJson.h> // ArduinoJson by Benoit
+#include <SPIFFS.h>      // File system for ESP32
 #include <vector>
-#include <PubSubClient.h> // MQTT client library
+#include <PubSubClient.h>     // MQTT client library
 #include <WiFiClientSecure.h> // FIX: Included and used for secure MQTT connection (8883)
 
 // ---------------- CONFIG ----------------
-const char* ssid = "Pixel_Alf";
-const char* password = "alfredopassword04";
+const char *ssid = "Pixel_Alf";
+const char *password = "alfredopassword04";
 
 // UDP Server Configuration (for QoS Telemetry)
 const char *udp_server_ip = "10.233.220.191";
@@ -37,8 +37,8 @@ const char *DEVICE_ID = "ESP32_Device_01";
 
 DHT dht(DHTPIN, DHTTYPE);
 WiFiUDP udp;
-// FIX 1: Must use WiFiClientSecure for setInsecure() and port 8883
-WiFiClientSecure espClient; 
+
+WiFiClientSecure espClient;
 PubSubClient client(espClient); // MQTT Client using secure WiFiClient
 
 unsigned long seq = 0; // Sequence number for guaranteed delivery
@@ -49,7 +49,7 @@ bool sendWithQoS(const String &payload, unsigned long current_seq);
 void logDataToFile(const String &payload);
 void transmitStoredData();
 void reconnectMqtt();
-// FIX: Updated signature to accept String payload for convenience, converting inside the function
+
 void publishMessage(const char *topic, const String &payload, boolean retained);
 
 // Function to wait for an acknowledgement from the UDP server
@@ -67,8 +67,6 @@ bool waitForAck(unsigned long mySeq, const char *myId)
             int len = udp.read(incoming, sizeof(incoming) - 1);
             incoming[len] = 0;
 
-            // Use JsonDocument (best practice, though original used StaticJsonDocument)
-            // Note: Since this block was not causing the error, I'm keeping the original type for minimal change.
             StaticJsonDocument<128> doc;
             DeserializationError error = deserializeJson(doc, incoming);
 
@@ -323,17 +321,17 @@ void callback(char *topic, byte *payload, unsigned int length)
     for (unsigned int i = 0; i < length; i++)
         Serial.print((char)payload[i]);
     Serial.println();
-    // Add logic here to process received commands
 }
 
 //------------------------------
 void publishMessage(const char *topic, const String &payload, boolean retained)
 {
-    // FIX 2: Use payload.c_str() for publishing
     if (client.publish(topic, payload.c_str(), retained))
     {
         Serial.println("JSON published to " + String(topic));
-    } else {
+    }
+    else
+    {
         Serial.print("MQTT publish failed for topic: ");
         Serial.println(topic);
     }
@@ -358,25 +356,25 @@ void setup()
     WiFi.disconnect(true);
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi");
-    
+
     unsigned long start_time = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start_time < 30000) // 30s timeout
     {
         Serial.print(".");
         delay(500);
     }
-    
+
     if (WiFi.status() == WL_CONNECTED)
     {
         Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
-    } else {
+    }
+    else
+    {
         Serial.println("\nFATAL ERROR: Failed to connect to WiFi!");
     }
-    
+
     // --- MQTT Setup ---
-    // The PubSubClient library needs a client context for the server, port, and callback
-    // FIX 1: setInsecure() requires the secure client, espClient is now WiFiClientSecure
-    espClient.setInsecure(); 
+    espClient.setInsecure();
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
 
@@ -385,7 +383,7 @@ void setup()
 
     // 2. Transmit stored data on restart
     // Moved to normal loop after finalization, block kept for testing purposes
-    //transmitStoredData();
+    // transmitStoredData();
 }
 
 void loop()
@@ -409,7 +407,7 @@ void loop()
     }
 
     // 2. Build JSON payload
-    JsonDocument doc; // Fixed: Use JsonDocument (best practice)
+    JsonDocument doc;
     doc["id"] = DEVICE_ID;
     doc["type"] = "WeatherObserved";
     doc["temperature"] = temp;
@@ -423,16 +421,17 @@ void loop()
 
     // 3. Attempt to send with QoS (UDP)
     bool delivered = sendWithQoS(payload, seq);
-    
+
     // 4. Publish via MQTT for command center visibility
-    // FIX 2: The publishMessage function is now called correctly
-    publishMessage("/comcs/g04/sensor", payload, true); 
-    
+    publishMessage("/comcs/g04/sensor", payload, true);
+
     // 5. Handle failure by logging to file (Req. a)
     if (!delivered)
     {
         logDataToFile(payload);
-    }else{
+    }
+    else
+    {
         // Attempt to send stored data, since it is expected that the
         // server can now receive and reply
         transmitStoredData();
