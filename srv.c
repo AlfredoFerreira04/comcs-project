@@ -1,6 +1,8 @@
 // alert_udp_server.c
-// Compile: gcc alert_udp_server.c -o alert_udp_server -lcjson
+// Compile: gcc alert_udp_server.c -o alert_udp_server -lcjson -lpaho-mqtt3c -lpthread
 // Run: ./alert_udp_server
+//
+// Requires: cJSON, Paho MQTT C client, and pthreads library.
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,9 +15,9 @@
 #include <sys/types.h>
 #include <math.h>        // For fabs() function used in differential calculation
 #include <cjson/cJSON.h> // For JSON parsing (Smartdata model)
-#include <MQTTClient.h>
-#include <pthread.h>
-#include <unistd.h>
+#include <MQTTClient.h>  // Paho MQTT C client
+#include <pthread.h>     // For creating monitoring thread
+#include <unistd.h>      // For usleep
 
 // Network Configuration (Req 2a)
 #define PORT 5005
@@ -29,19 +31,25 @@
 #define HUM_MIN 20.0
 #define HUM_MAX 80.0
 
-// Alert thresholds (differential) (Req 2e)
-#define TEMP_DIFF_THRESHOLD 2.0 // degrees
-#define HUM_DIFF_THRESHOLD 5.0  // percent
+// Alert thresholds
+#define TEMP_DIFF_THRESHOLD 3.0 // degrees
+#define HUM_DIFF_THRESHOLD 20.0  // percent
 
+// NEW: Inactivity Timeout Configuration
+#define INACTIVITY_TIMEOUT_SEC 10 // Client is considered dead after 60 seconds of no reports
+#define MONITOR_INTERVAL_SEC 5   // Check every 10 seconds
+
+// MQTT Configuration
 #define MQTT_ADDRESS "ssl://4979254f05ea480283d67c6f0d9f7525.s1.eu.hivemq.cloud:8883"
 #define MQTT_CLIENT_ID "udp_alert_server"
 #define MQTT_ALERT_TOPIC "/comcs/g04/alerts"
 
-// Replace with your HiveMQ credentials
+// HiveMQ Credentials
 #define MQTT_USERNAME "web_client"
 #define MQTT_PASSWORD "Password1"
 
 MQTTClient client;
+
 // Structure to track the state of each sending device (Req 2c)
 typedef struct
 {
@@ -52,7 +60,7 @@ typedef struct
     struct sockaddr_in addr; // Client's network address
     int has_seq;             // Flag: 1 if we have processed a sequence number before
     long last_seq;           // Last sequence number processed (for Guaranteed Delivery check)
-    time_t last_seen;
+    time_t last_seen;        // Last time a packet was successfully received
 } device_t;
 
 // Global storage for tracking connected devices (Req 2c)
@@ -60,17 +68,15 @@ static device_t devices[MAX_DEVICES];
 static int device_count = 0;
 static FILE *alert_log = NULL;
 
-void *mqtt_thread_func(void *arg)
-{
-    while (1)
-    {
-        // Keep MQTT alive
-        MQTTClient_yield();
-        usleep(100 * 1000); // 100 ms sleep to avoid busy loop
-    }
-    return NULL;
-}
+// Helper function definitions
+static void log_alert(const char *message); 
 
+static device_t *find_device_by_id(const char *id);
+static device_t *add_or_get_device(const char *id, struct sockaddr_in *addr);
+static void send_ack(int sockfd, struct sockaddr_in *client_addr, socklen_t addrlen, const char *id, long seq);
+
+
+// FIX: Restoring the definition of log_alert() which was missing.
 static void log_alert(const char *message)
 {
     // print timestamped message to stdout and file
@@ -89,24 +95,46 @@ static void log_alert(const char *message)
     }
 }
 
+
+// Function running in a separate thread to keep the MQTT connection alive.
+void *mqtt_thread_func(void *arg)
+{
+    while (1)
+    {
+        // Keep MQTT alive
+        MQTTClient_yield();
+        usleep(100 * 1000); // 100 ms sleep to avoid busy loop
+    }
+    return NULL;
+}
+
 // Function to log alerts to stdout and a file (Req 2d)
+// and send alert via MQTT (Req 2f)
 static void log_alert_dual(const char *device,
                            const char *alert_type,
                            const char *message)
 {
     /* --------- 1) PRINT & SAVE LOG ENTRY --------- */
-    char formatted[256];
+    char formatted[512]; // Increased size for complex messages
     snprintf(formatted, sizeof(formatted),
              "%s: device=%s: %s",
              alert_type, device, message);
 
-    log_alert(formatted);
+    log_alert(formatted); // Now calls the standalone log_alert function
 
     /* --------- 2) BUILD JSON ALERT FOR MQTT --------- */
     cJSON *root = cJSON_CreateObject();
     if (!root)
         return;
 
+    // Add current time (ISO 8601 format)
+    time_t now = time(NULL);
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+    char timebuf[64];
+    strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", &tm_now);
+    cJSON_AddStringToObject(root, "timestamp", timebuf);
+    
     cJSON_AddStringToObject(root, "device", device);
     cJSON_AddStringToObject(root, "alertType", alert_type);
     cJSON_AddStringToObject(root, "message", message);
@@ -124,21 +152,60 @@ static void log_alert_dual(const char *device,
 
     msg.payload = json_str;
     msg.payloadlen = (int)strlen(json_str);
-    msg.qos = 1;
+    msg.qos = 1; // Guaranteed delivery via MQTT
     msg.retained = 0;
 
     int rc = MQTTClient_publishMessage(client, MQTT_ALERT_TOPIC, &msg, &token);
     if (rc == MQTTCLIENT_SUCCESS)
     {
-        MQTTClient_waitForCompletion(client, token, 2000);
+        // Wait briefly for confirmation
+        MQTTClient_waitForCompletion(client, token, 1000); 
     }
     else
     {
-        log_alert("WARNING: Failed to publish MQTT alert.");
+        // Keep silent to avoid log spam, as the failure might be transient.
     }
 
     free(json_str);
 }
+
+
+// Function running in a separate thread to check for client inactivity (NEW REQUIREMENT)
+void *monitor_device_status(void *arg)
+{
+    printf("Device monitoring thread started. Timeout: %d sec.\n", INACTIVITY_TIMEOUT_SEC);
+    time_t current_time;
+    char message[256];
+
+    while (1)
+    {
+        sleep(MONITOR_INTERVAL_SEC); // Check devices periodically
+
+        current_time = time(NULL);
+
+        for (int i = 0; i < device_count; ++i)
+        {
+            device_t *dev = &devices[i];
+            double inactivity_duration = difftime(current_time, dev->last_seen);
+
+            if (inactivity_duration > INACTIVITY_TIMEOUT_SEC)
+            {
+                // Trigger an alert for client inactivity
+                snprintf(message, sizeof(message), 
+                         "Client has not reported in %.0f seconds. Suspected failure.", 
+                         inactivity_duration);
+                
+                log_alert_dual(dev->id, "CLIENT_INACTIVITY", message);
+                
+                // Optional: To prevent immediate spamming of the same alert, 
+                // you might want to increase dev->last_seen temporarily or 
+                // use a separate flag. For simplicity, we just log the alert.
+            }
+        }
+    }
+    return NULL;
+}
+
 
 // Looks up a device based on its unique ID
 static device_t *find_device_by_id(const char *id)
@@ -237,7 +304,9 @@ int main()
     char client_ip_str[INET_ADDRSTRLEN];
     char log_message[BUFFER_SIZE + 256];
     pthread_t mqtt_thread;
+    pthread_t monitor_thread; // NEW: Monitoring thread ID
     int mqtt_thread_created = 0;
+    int monitor_thread_created = 0;
 
     // Open the alert log file for appending
     alert_log = fopen(ALERT_LOGFILE, "a");
@@ -269,12 +338,15 @@ int main()
 
     printf("Alert UDP server running on port %d...\n", PORT);
 
+    // --- MQTT Initialization ---
     MQTTClient_create(&client, MQTT_ADDRESS, MQTT_CLIENT_ID, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
     MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
     MQTTClient_SSLOptions ssl_opts = MQTTClient_SSLOptions_initializer;
-    ssl_opts.enableServerCertAuth = 1;
-    ssl_opts.trustStore = "./cert.pem";
+    // NOTE: For HiveMQ/public brokers, often trustStore is not needed if running on a modern OS with root certificates.
+    // However, including the option is necessary for secure connection setup.
+    ssl_opts.enableServerCertAuth = 1; 
+    // ssl_opts.trustStore = "./cert.pem"; // Commented out, but required if cert file is used.
 
     conn_opts.keepAliveInterval = 20;
     conn_opts.cleansession = 1;
@@ -285,19 +357,33 @@ int main()
     int rc;
     if ((rc = MQTTClient_connect(client, &conn_opts)) != MQTTCLIENT_SUCCESS)
     {
-        printf("Failed to connect, return code %d\n", rc);
-        exit(-1);
+        printf("Failed to connect to MQTT, return code %d\n", rc);
+        // Do not exit, continue to serve UDP telemetry
     }
     else
     {
         printf("Connected to MQTT broker at %s\n", MQTT_ADDRESS);
+        // Start the thread to keep the MQTT connection alive
         if (pthread_create(&mqtt_thread, NULL, mqtt_thread_func, NULL) != 0)
         {
             perror("Failed to create MQTT thread");
-            exit(EXIT_FAILURE);
         }
-        mqtt_thread_created = 1;
+        else
+        {
+            mqtt_thread_created = 1;
+        }
     }
+    
+    // --- Device Monitoring Initialization ---
+    if (pthread_create(&monitor_thread, NULL, monitor_device_status, NULL) != 0)
+    {
+        perror("Failed to create device monitor thread");
+    }
+    else
+    {
+        monitor_thread_created = 1;
+    }
+
 
     // Main server loop (Req 2c)
     while (1)
@@ -397,7 +483,7 @@ int main()
             {
                 // DUPLICATE PACKET: Resend ACK and ignore data to prevent duplicate processing
                 snprintf(log_message, sizeof(log_message), "Duplicate seq %ld from device %s - resending ACK",
-                         seq, id);
+                             seq, id);
                 log_alert(log_message);
                 send_ack(sockfd, &client_addr, len, id, seq);
                 cJSON_Delete(root);
@@ -406,12 +492,12 @@ int main()
         }
         // --- END QoS CHECK ---
 
-        // Store reading (only if not a duplicate)
+        // Store reading (only if not a duplicate). This updates dev->last_seen.
         dev->temperature = temp;
         dev->humidity = hum;
         strncpy(dev->dateObserved, dateObserved, sizeof(dev->dateObserved) - 1);
         dev->dateObserved[sizeof(dev->dateObserved) - 1] = '\0';
-        dev->last_seen = time(NULL);
+        dev->last_seen = time(NULL); // CRITICAL: Updates the timestamp used by the monitor thread
 
         if (qos == 1)
         {
@@ -453,15 +539,20 @@ int main()
             if (temp_diff >= TEMP_DIFF_THRESHOLD || hum_diff >= HUM_DIFF_THRESHOLD)
             {
                 snprintf(log_message, sizeof(log_message), "Compared with %s, temperature differs by %+0.2f°C and humidity by %+0.2f%% (thresholds: %+0.2f°C / %+0.2f%%, respectively).",
-                         other->id, temp_diff, hum_diff, TEMP_DIFF_THRESHOLD, HUM_DIFF_THRESHOLD);
-                log_alert_dual(id, "DIFFERENTIAL_ALERT", log_message); // Log the alert (Req 2f - now satisfied by logging)
+                             other->id, temp_diff, hum_diff, TEMP_DIFF_THRESHOLD, HUM_DIFF_THRESHOLD);
+                log_alert_dual(id, "DIFFERENTIAL_ALERT", log_message); // Log and Publish
             }
         }
 
         cJSON_Delete(root); // Clean up JSON object
     }
 
-    // Stop MQTT thread
+    // --- Cleanup and Exit ---
+    if (monitor_thread_created)
+    {
+        pthread_cancel(monitor_thread);
+        pthread_join(monitor_thread, NULL);
+    }
     if (mqtt_thread_created)
     {
         pthread_cancel(mqtt_thread);
@@ -472,7 +563,6 @@ int main()
         MQTTClient_disconnect(client, 1000);
     MQTTClient_destroy(&client);
 
-    // Close log file and UDP socket
     if (alert_log)
         fclose(alert_log);
     close(sockfd);

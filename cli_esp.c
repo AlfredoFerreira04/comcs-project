@@ -1,26 +1,29 @@
+// This code is adapted for the ESP32 platform.
+// It combines guaranteed delivery (QoS) via UDP with publishing to an MQTT broker.
+// Required Libraries: WiFi, DHT, ArduinoJson, PubSubClient, SPIFFS
+
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <DHT.h>         // DHT by Adafruit
-#include <ArduinoJson.h> // ArduinoJson by Benoit
-#include <SPIFFS.h>
+#include <DHT.h>          // DHT by Adafruit
+#include <ArduinoJson.h>  // ArduinoJson by Benoit
+#include <SPIFFS.h>       // File system for ESP32
 #include <vector>
-#include <PubSubClient.h>
+#include <PubSubClient.h> // MQTT client library
+#include <WiFiClientSecure.h> // FIX: Included and used for secure MQTT connection (8883)
 
 // ---------------- CONFIG ----------------
-const char *ssid = "Redmi Note 12 Pro 5G";
-const char *password = "barbosa2632004";
+const char* ssid = "Pixel_Alf";
+const char* password = "alfredopassword04";
 
-const char *udp_server_ip = "XXX.XXX.XXX.XXX";
+// UDP Server Configuration (for QoS Telemetry)
+const char *udp_server_ip = "10.233.220.191";
 const int udp_port = 5005;
 
-// MQTT Broker settings
+// MQTT Broker Configuration (for Command Centre Alerts/Data)
 const char *mqtt_server = "4979254f05ea480283d67c6f0d9f7525.s1.eu.hivemq.cloud";
 const char *mqtt_username = "web_client";
 const char *mqtt_password = "Password1";
-const int mqtt_port = 8883;
-
-WiFiClientSecure espClient;
-PubSubClient client(espClient);
+const int mqtt_port = 8883; // Secure MQTT port
 
 #define DHTPIN 4
 #define DHTTYPE DHT11
@@ -34,6 +37,9 @@ const char *DEVICE_ID = "ESP32_Device_01";
 
 DHT dht(DHTPIN, DHTTYPE);
 WiFiUDP udp;
+// FIX 1: Must use WiFiClientSecure for setInsecure() and port 8883
+WiFiClientSecure espClient; 
+PubSubClient client(espClient); // MQTT Client using secure WiFiClient
 
 unsigned long seq = 0; // Sequence number for guaranteed delivery
 int qos = 1;           // 0 = best effort, 1 = guaranteed delivery
@@ -42,6 +48,9 @@ int qos = 1;           // 0 = best effort, 1 = guaranteed delivery
 bool sendWithQoS(const String &payload, unsigned long current_seq);
 void logDataToFile(const String &payload);
 void transmitStoredData();
+void reconnectMqtt();
+// FIX: Updated signature to accept String payload for convenience, converting inside the function
+void publishMessage(const char *topic, const String &payload, boolean retained);
 
 // Function to wait for an acknowledgement from the UDP server
 bool waitForAck(unsigned long mySeq, const char *myId)
@@ -49,7 +58,7 @@ bool waitForAck(unsigned long mySeq, const char *myId)
     unsigned long start = millis();
     char incoming[512];
 
-    // Check for ACK for a brief timeout (200ms)
+    // Check for ACK for a brief timeout (800ms)
     while (millis() - start < 800)
     {
         int packetSize = udp.parsePacket();
@@ -58,13 +67,13 @@ bool waitForAck(unsigned long mySeq, const char *myId)
             int len = udp.read(incoming, sizeof(incoming) - 1);
             incoming[len] = 0;
 
+            // Use JsonDocument (best practice, though original used StaticJsonDocument)
+            // Note: Since this block was not causing the error, I'm keeping the original type for minimal change.
             StaticJsonDocument<128> doc;
             DeserializationError error = deserializeJson(doc, incoming);
 
             if (error)
             {
-                // Serial.print("ACK Parsing failed: ");
-                // Serial.println(error.c_str());
                 continue;
             }
 
@@ -76,7 +85,6 @@ bool waitForAck(unsigned long mySeq, const char *myId)
                 strcmp(id, myId) == 0 &&
                 seq == mySeq)
             {
-
                 Serial.println("ACK received!");
                 return true;
             }
@@ -92,9 +100,9 @@ bool sendWithQoS(const String &payload, unsigned long current_seq)
     bool delivered = false;
     int retry_count = 0;
     unsigned long backoff_ms = INITIAL_BACKOFF_MS;
-    int qos_level = 1; // Always assume 1 for this function
+    int qos_level = 1;
 
-    // Check for communications failure (Req. b: Error Handling)
+    // Check for communications failure (Error Handling)
     if (WiFi.status() != WL_CONNECTED)
     {
         Serial.println("ERROR: WiFi disconnected. Cannot send live data.");
@@ -103,18 +111,17 @@ bool sendWithQoS(const String &payload, unsigned long current_seq)
 
     do
     {
-        // 1. Send UDP packet
+        // 1. Send UDP packet (using const char* IP)
         udp.beginPacket(udp_server_ip, udp_port);
         udp.print(payload);
         udp.endPacket();
 
-        Serial.print("Sent (Seq ");
+        Serial.print("Sent UDP (Seq ");
         Serial.print(current_seq);
         Serial.print("): ");
-        // Only print first 60 chars of payload for logs
         Serial.println(payload.substring(0, min((int)payload.length(), 60)) + "...");
 
-        // 2. Wait for ACK (Req. b: Error Handling)
+        // 2. Wait for ACK (Error Handling)
         if (qos_level == 1)
         {
             delivered = waitForAck(current_seq, DEVICE_ID);
@@ -134,7 +141,7 @@ bool sendWithQoS(const String &payload, unsigned long current_seq)
                     return false; // Indicate failure to deliver/log
                 }
 
-                // 3. Implement Exponential Backoff (Req. b: Error Handling)
+                // 3. Implement Exponential Backoff (Error Handling)
                 delay(backoff_ms);
                 backoff_ms *= 2;
                 if (backoff_ms > 5000)
@@ -143,7 +150,6 @@ bool sendWithQoS(const String &payload, unsigned long current_seq)
         }
         else
         {
-            // QoS 0 is always "delivered" instantly
             delivered = true;
         }
 
@@ -152,17 +158,17 @@ bool sendWithQoS(const String &payload, unsigned long current_seq)
     return delivered; // True if ACK received
 }
 
-// Function to store a payload string into the SPIFFS log file (Req. a)
+// Function to store a payload string into the SPIFFS log file
 void logDataToFile(const String &payload)
 {
-    // Check if SPIFFS is ready (it should be initialized in setup)
+    // Check global flag (SPIFFS for ESP32)
     if (!SPIFFS.begin())
     {
-        Serial.println("SPIFFS not mounted! Cannot log data.");
         return;
     }
 
-    File file = SPIFFS.open(log_filepath, FILE_APPEND);
+    // Use "a" (append) mode
+    File file = SPIFFS.open(log_filepath, "a");
     if (!file)
     {
         Serial.println("Failed to open file for appending.");
@@ -181,18 +187,19 @@ void logDataToFile(const String &payload)
     file.close();
 }
 
-// Function to transmit stored data on restart/reconnection (Req. c)
+// Function to transmit stored data on restart/reconnection
 void transmitStoredData()
 {
     Serial.println("--- Checking for stored telemetry on restart/reconnect ---");
 
-    if (!SPIFFS.begin(true))
+    if (!SPIFFS.begin())
     {
         Serial.println("SPIFFS mount failed! Cannot check log.");
         return;
     }
 
-    File file = SPIFFS.open(log_filepath, FILE_READ);
+    // Use "r" (read) mode
+    File file = SPIFFS.open(log_filepath, "r");
     if (!file)
     {
         Serial.println("No existing telemetry log file found.");
@@ -211,7 +218,8 @@ void transmitStoredData()
         if (line.length() == 0)
             continue;
 
-        StaticJsonDocument<512> doc;
+        // Use JsonDocument (best practice)
+        JsonDocument doc;
         DeserializationError error = deserializeJson(doc, line);
 
         if (error)
@@ -257,7 +265,8 @@ void transmitStoredData()
         else
         {
             // Rewrite the file with only the failed messages
-            File new_file = SPIFFS.open(log_filepath, FILE_WRITE);
+            // Use "w" (write/overwrite) mode
+            File new_file = SPIFFS.open(log_filepath, "w");
             if (!new_file)
             {
                 Serial.println("FATAL: Failed to open file for rewriting!");
@@ -277,8 +286,9 @@ void transmitStoredData()
         }
     }
 }
+
 //------------------------------
-void reconnect()
+void reconnectMqtt()
 {
     while (!client.connected())
     {
@@ -287,9 +297,11 @@ void reconnect()
         String clientId = "ESP32-G04-";
         clientId += String(random(0xffff), HEX);
 
+        // Connect with client ID, username, and password
         if (client.connect(clientId.c_str(), mqtt_username, mqtt_password))
         {
             Serial.println("connected");
+            // Subscribe to the command topic
             client.subscribe("/comcs/g04/commands");
         }
         else
@@ -305,25 +317,31 @@ void reconnect()
 //------------------------------
 void callback(char *topic, byte *payload, unsigned int length)
 {
-    Serial.print("Message received: ");
-    for (int i = 0; i < length; i++)
+    Serial.print("Command received on topic: ");
+    Serial.println(topic);
+    Serial.print("Payload: ");
+    for (unsigned int i = 0; i < length; i++)
         Serial.print((char)payload[i]);
     Serial.println();
+    // Add logic here to process received commands
 }
 
 //------------------------------
-void publishMessage(const char *topic, const char *payload, boolean retained)
+void publishMessage(const char *topic, const String &payload, boolean retained)
 {
-    if (client.publish(topic, payload, retained))
+    // FIX 2: Use payload.c_str() for publishing
+    if (client.publish(topic, payload.c_str(), retained))
     {
         Serial.println("JSON published to " + String(topic));
-        Serial.println(payload);
+    } else {
+        Serial.print("MQTT publish failed for topic: ");
+        Serial.println(topic);
     }
 }
 
 void setup()
 {
-    delay(5000);
+    delay(5000); // Wait for serial monitor to open
     Serial.begin(9600);
 
     // 1. Initialise SPIFFS
@@ -336,32 +354,46 @@ void setup()
         Serial.println("SPIFFS mounted successfully.");
     }
 
+    // --- Wi-Fi Connection ---
+    WiFi.disconnect(true);
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi");
-    while (WiFi.status() != WL_CONNECTED)
+    
+    unsigned long start_time = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start_time < 30000) // 30s timeout
     {
         Serial.print(".");
         delay(500);
     }
-    Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
-
-    espClient.setInsecure();
-
+    
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
+    } else {
+        Serial.println("\nFATAL ERROR: Failed to connect to WiFi!");
+    }
+    
+    // --- MQTT Setup ---
+    // The PubSubClient library needs a client context for the server, port, and callback
+    // FIX 1: setInsecure() requires the secure client, espClient is now WiFiClientSecure
+    espClient.setInsecure(); 
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
 
     udp.begin(udp_port);
     dht.begin();
 
-    // 2. Transmit stored data on restart (Req. c)
+    // 2. Transmit stored data on restart
     transmitStoredData();
 }
 
 void loop()
 {
+    // Maintain MQTT connection
     if (!client.connected())
-        reconnect();
+        reconnectMqtt();
 
+    // Required for the MQTT client to process incoming and outgoing messages
     client.loop();
 
     // 1. Read sensor data
@@ -376,7 +408,7 @@ void loop()
     }
 
     // 2. Build JSON payload
-    StaticJsonDocument<512> doc;
+    JsonDocument doc; // Fixed: Use JsonDocument (best practice)
     doc["id"] = DEVICE_ID;
     doc["type"] = "WeatherObserved";
     doc["temperature"] = temp;
@@ -388,20 +420,20 @@ void loop()
     String payload;
     serializeJson(doc, payload);
 
-    // 3. Attempt to send with QoS
+    // 3. Attempt to send with QoS (UDP)
     bool delivered = sendWithQoS(payload, seq);
-    publishMessage("/comcs/g04/sensor", payload, true);
-
-    // 4. Handle failure by logging to file (Req. a)
+    
+    // 4. Publish via MQTT for command center visibility
+    // FIX 2: The publishMessage function is now called correctly
+    publishMessage("/comcs/g04/sensor", payload, true); 
+    
+    // 5. Handle failure by logging to file (Req. a)
     if (!delivered)
     {
-        // This only happens if max retries failed inside sendWithQoS()
         logDataToFile(payload);
     }
 
-    // 5. Update sequence number for the next live packet
-    // Sequence number increments regardless of logging status, as the logged
-    // packet retains its sequence number and will be resent later.
+    // 6. Update sequence number
     seq++;
 
     delay(5000); // Wait 5 seconds before the next observation
