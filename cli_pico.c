@@ -197,7 +197,7 @@ void logDataToFile(const String &payload)
 // Function to transmit stored data on restart/reconnection
 void transmitStoredData()
 {
-    Serial.println("--- Checking for stored telemetry on restart/reconnect ---");
+    Serial.println("--- Checking for stored telemetry---");
 
     // Check global flag
     if (!fs_is_ready)
@@ -295,7 +295,7 @@ void transmitStoredData()
     }
 }
 //------------------------------
-void reconnect()
+void reconnectMqtt()
 {
     while (!client.connected())
     {
@@ -304,9 +304,11 @@ void reconnect()
         String clientId = "ESP32-G04-";
         clientId += String(random(0xffff), HEX);
 
+        // Connect with client ID, username, and password
         if (client.connect(clientId.c_str(), mqtt_username, mqtt_password))
         {
             Serial.println("connected");
+            // Subscribe to the command topic
             client.subscribe("/comcs/g04/commands");
         }
         else
@@ -376,7 +378,7 @@ void setup()
     // --- Connection Timeout Logic ---
 
     // Explicitly disconnect before starting a new connection attempt for clean radio state.
-    WiFi.disconnect(true);
+    //WiFi.disconnect(true);
 
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi");
@@ -409,11 +411,19 @@ void setup()
 
     // 2. Transmit stored data on restart (Req. c)
     // This function now uses the fs_is_ready flag.
-    transmitStoredData();
+    // Moved to loop per request.
+    //transmitStoredData();
 }
 
 void loop()
 {
+    // Maintain MQTT connection
+    if (!client.connected())
+        reconnectMqtt();
+
+    // Required for the MQTT client to process incoming and outgoing messages
+    client.loop();
+    
     // 1. Read sensor data
     float temp = dht.readTemperature();
     float hum = dht.readHumidity();
@@ -448,6 +458,10 @@ void loop()
     {
         // This only happens if max retries failed inside sendWithQoS()
         logDataToFile(payload);
+    }else{
+      // Attempt to send stored data, since it is expected that the
+      // server can now receive and reply
+      transmitStoredData();
     }
 
     // 5. Update sequence number for the next live packet

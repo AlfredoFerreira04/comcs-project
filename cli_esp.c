@@ -190,7 +190,7 @@ void logDataToFile(const String &payload)
 // Function to transmit stored data on restart/reconnection
 void transmitStoredData()
 {
-    Serial.println("--- Checking for stored telemetry on restart/reconnect ---");
+    Serial.println("--- Checking for stored telemetry---");
 
     if (!SPIFFS.begin())
     {
@@ -384,7 +384,8 @@ void setup()
     dht.begin();
 
     // 2. Transmit stored data on restart
-    transmitStoredData();
+    // Moved to normal loop after finalization, block kept for testing purposes
+    //transmitStoredData();
 }
 
 void loop()
@@ -431,6 +432,10 @@ void loop()
     if (!delivered)
     {
         logDataToFile(payload);
+    }else{
+        // Attempt to send stored data, since it is expected that the
+        // server can now receive and reply
+        transmitStoredData();
     }
 
     // 6. Update sequence number

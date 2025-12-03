@@ -3,3 +3,6 @@ server:
 
 clean:
 	rm server *.log
+
+run:
+	./server
