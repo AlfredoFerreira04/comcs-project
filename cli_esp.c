@@ -4,16 +4,16 @@
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <DHT.h>          // DHT by Adafruit
-#include <ArduinoJson.h>  // ArduinoJson by Benoit
-#include <SPIFFS.h>       // File system for ESP32
+#include <DHT.h>         // DHT by Adafruit
+#include <ArduinoJson.h> // ArduinoJson by Benoit
+#include <SPIFFS.h>      // File system for ESP32
 #include <vector>
 #include <PubSubClient.h> // MQTT client library
-#include <WiFiClientSecure.h> // FIX: Included and used for secure MQTT connection (8883)
+#include <WiFiClientSecure.h>
 
 // ---------------- CONFIG ----------------
-const char* ssid = "Pixel_Alf";
-const char* password = "alfredopassword04";
+const char *ssid = "Pixel_Alf";
+const char *password = "alfredopassword04";
 
 // UDP Server Configuration (for QoS Telemetry)
 const char *udp_server_ip = "10.233.220.191";
@@ -35,29 +35,29 @@ const char *log_filepath = "/telemetry_log.txt";
 const char *DEVICE_ID = "ESP32_Device_01";
 // --- ADAPTIVE THROTTLING CONFIG ---
 #define BASE_DELAY_MS 5000
-#define MAX_DELAY_MS 60000 // Cap generation delay at 60 seconds
+#define MAX_DELAY_MS 60000      // Cap generation delay at 60 seconds
 #define THROTTLING_THRESHOLD 10 // Start throttling if backlog exceeds 10 packets
-#define THROTTLING_FACTOR 2000 // Increase delay by 2 seconds per packet over threshold
+#define THROTTLING_FACTOR 2000  // Increase delay by 2 seconds per packet over threshold
 // ----------------------------
 
 DHT dht(DHTPIN, DHTTYPE);
 WiFiUDP udp;
-// FIX 1: Must use WiFiClientSecure for setInsecure() and port 8883
-WiFiClientSecure espClient; 
+
+WiFiClientSecure espClient;
 PubSubClient client(espClient); // MQTT Client using secure WiFiClient
 
 unsigned long seq = 0; // Sequence number for guaranteed delivery
 int qos = 1;           // 0 = best effort, 1 = guaranteed delivery
 
-// NEW: Global variable for dynamic loop delay
-unsigned long current_delay = BASE_DELAY_MS; 
+// Global variable for dynamic loop delay
+unsigned long current_delay = BASE_DELAY_MS;
 
 // Forward declaration
 bool sendWithQoS(const String &payload, unsigned long current_seq);
 void logDataToFile(const String &payload);
 void transmitStoredData();
 void reconnectMqtt();
-// FIX: Updated signature to accept String payload for convenience, converting inside the function
+
 void publishMessage(const char *topic, const String &payload, boolean retained);
 
 // Function to wait for an acknowledgement from the UDP server
@@ -212,7 +212,7 @@ void transmitStoredData()
     {
         Serial.println("No existing telemetry log file found.");
         // If file doesn't exist, backlog is zero, reset delay
-        current_delay = BASE_DELAY_MS; 
+        current_delay = BASE_DELAY_MS;
         return;
     }
 
@@ -228,7 +228,6 @@ void transmitStoredData()
         if (line.length() == 0)
             continue;
 
-        // Use JsonDocument (best practice)
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, line);
 
@@ -255,37 +254,40 @@ void transmitStoredData()
     }
 
     file.close();
-    
+
     // --- ADAPTIVE THROTTLING LOGIC ---
     int backlog_count = failed_messages.size();
 
-    if (backlog_count > THROTTLING_THRESHOLD) {
+    if (backlog_count > THROTTLING_THRESHOLD)
+    {
         // Calculate new delay based on backlog size
         unsigned long throttle_increase = (backlog_count - THROTTLING_THRESHOLD) * THROTTLING_FACTOR;
         current_delay = BASE_DELAY_MS + throttle_increase;
-        
+
         // Cap the delay
-        if (current_delay > MAX_DELAY_MS) {
+        if (current_delay > MAX_DELAY_MS)
+        {
             current_delay = MAX_DELAY_MS;
         }
-        
+
         Serial.print("CONGESTION DETECTED: Backlog=");
         Serial.print(backlog_count);
         Serial.print(". New generation delay: ");
         Serial.print(current_delay / 1000);
         Serial.println("s.");
-
-    } else {
+    }
+    else
+    {
         // If backlog is low, reset to base delay
         current_delay = BASE_DELAY_MS;
-        if (backlog_count > 0) {
+        if (backlog_count > 0)
+        {
             Serial.print("Backlog clearing: ");
             Serial.print(backlog_count);
             Serial.println(" remaining. Resetting delay.");
         }
     }
     // --- END ADAPTIVE THROTTLING ---
-
 
     // ----------------------------------------------------------------------
     // Rolling Window Logic: Rewrite the log file with only the failed messages
@@ -339,7 +341,6 @@ void reconnectMqtt()
         if (client.connect(clientId.c_str(), mqtt_username, mqtt_password))
         {
             Serial.println("connected");
-            // Subscribe to the command topic
             client.subscribe("/comcs/g04/commands");
         }
         else
@@ -361,17 +362,17 @@ void callback(char *topic, byte *payload, unsigned int length)
     for (unsigned int i = 0; i < length; i++)
         Serial.print((char)payload[i]);
     Serial.println();
-    // Add logic here to process received commands
 }
 
 //------------------------------
 void publishMessage(const char *topic, const String &payload, boolean retained)
 {
-    // Use payload.c_str() for publishing
     if (client.publish(topic, payload.c_str(), retained))
     {
         Serial.println("JSON published to " + String(topic));
-    } else {
+    }
+    else
+    {
         Serial.print("MQTT publish failed for topic: ");
         Serial.println(topic);
     }
@@ -396,25 +397,25 @@ void setup()
     WiFi.disconnect(true);
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi");
-    
+
     unsigned long start_time = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start_time < 30000) // 30s timeout
     {
         Serial.print(".");
         delay(500);
     }
-    
+
     if (WiFi.status() == WL_CONNECTED)
     {
         Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
-    } else {
+    }
+    else
+    {
         Serial.println("\nFATAL ERROR: Failed to connect to WiFi!");
     }
-    
+
     // --- MQTT Setup ---
-    // The PubSubClient library needs a client context for the server, port, and callback
-    // FIX 1: setInsecure() requires the secure client, espClient is now WiFiClientSecure
-    espClient.setInsecure(); 
+    espClient.setInsecure();
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(callback);
 
@@ -443,13 +444,13 @@ void loop()
     }
 
     // 2. Build JSON payload
-    JsonDocument doc; 
+    JsonDocument doc;
     doc["id"] = DEVICE_ID;
     doc["type"] = "WeatherObserved";
     doc["temperature"] = temp;
     doc["relativeHumidity"] = hum;
     doc["dateObserved"] = millis(); // Using internal time for simplicity
-    doc["status"] = "OPERATIONAL"; // Simple QoS Flag
+    doc["status"] = "OPERATIONAL";  // Simple QoS Flag
     doc["qos"] = qos;
     doc["seq"] = seq;
 
@@ -458,22 +459,22 @@ void loop()
 
     // 3. Attempt to send with QoS (UDP)
     bool delivered = sendWithQoS(payload, seq);
-    
+
     // 4. Publish via MQTT for command center visibility
-    publishMessage("/comcs/g04/sensor", payload, true); 
-    
+    publishMessage("/comcs/g04/sensor", payload, true);
+
     // 5. Handle failure by logging to file (Req. a)
     if (!delivered)
     {
         logDataToFile(payload);
     }
-    
+
     // 6. Attempt to clear backlog and update throttling rate
     transmitStoredData();
-    
+
     // 7. Update sequence number
     seq++;
 
     // 8. Adaptive Delay based on current congestion
-    delay(current_delay); 
+    delay(current_delay);
 }
