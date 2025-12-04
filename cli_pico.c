@@ -1,29 +1,34 @@
 // This code is adapted for the Raspberry Pi Pico W using the Arduino framework.
-// It combines guaranteed delivery (QoS) via UDP with publishing to an MQTT broker.
-// Required Libraries: WiFi, DHT, ArduinoJson, PubSubClient, SPIFFS
+// It requires the 'Raspberry Pi Pico/RP2040' maintained by Earle F. Philhower
+// library installed via the Library Manager.
+// NOTE: The current code uses the high-level Arduino LittleFS wrapper, which is the
+// stable and recommended method for file system access in this environment, as the
+// low-level lfs.h API requires complex, platform-specific flash driver configuration.
 
-#include <WiFi.h>
+#include <WiFi.h> // Pico W WiFi
 #include <WiFiUdp.h>
-#include <DHT.h>          // DHT by Adafruit
-#include <ArduinoJson.h>  // ArduinoJson by Benoit
-#include <LittleFS.h>       // Replaces SPIFFS for Pico W
+#include <DHT.h>         // DHT by Adafruit
+#include <ArduinoJson.h> // ArduinoJson by Benoit
+#include <LittleFS.h>    // Replaces SPIFFS for Pico W
 #include <vector>
-#include <PubSubClient.h> // MQTT client library
-#include <WiFiClientSecure.h> // FIX: Included and used for secure MQTT connection (8883)
+#include <PubSubClient.h>
 
 // ---------------- CONFIG ----------------
-const char* ssid = "Pixel_Alf";
-const char* password = "alfredopassword04";
+const char *ssid = "Pixel_Alf";
+const char *password = "alfredopassword04";
 
-// UDP Server Configuration (for QoS Telemetry)
+// Note: Using IPAddress type for compatibility with Pico W networking
 const IPAddress udp_server_ip(10, 233, 220, 191);
 const int udp_port = 5005;
 
-// MQTT Broker Configuration (for Command Centre Alerts/Data)
+// MQTT Broker settings
 const char *mqtt_server = "4979254f05ea480283d67c6f0d9f7525.s1.eu.hivemq.cloud";
 const char *mqtt_username = "web_client";
 const char *mqtt_password = "Password1";
-const int mqtt_port = 8883; // Secure MQTT port
+const int mqtt_port = 8883;
+
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
 
 #define DHTPIN 4
 #define DHTTYPE DHT11
@@ -36,34 +41,19 @@ const char *DEVICE_ID = "PICO_Device_01";
 
 // --- WIFI CONFIG ---
 #define WIFI_CONNECT_TIMEOUT_MS 20000 // 20 seconds max to connect
-
-// --- ADAPTIVE THROTTLING CONFIG ---
-#define BASE_DELAY_MS 5000
-#define MAX_DELAY_MS 60000 // Cap generation delay at 60 seconds
-#define THROTTLING_THRESHOLD 10 // Start throttling if backlog exceeds 10 packets
-#define THROTTLING_FACTOR 2000 // Increase delay by 2 seconds per packet over threshold
 // ----------------------------
 
 DHT dht(DHTPIN, DHTTYPE);
 WiFiUDP udp;
-// FIX 1: Must use WiFiClientSecure for setInsecure() and port 8883
-WiFiClientSecure espClient; 
-PubSubClient client(espClient); // MQTT Client using secure WiFiClient
 
-unsigned long seq = 0; // Sequence number for guaranteed delivery
-int qos = 1;           // 0 = best effort, 1 = guaranteed delivery
-
-// NEW: Global variable for dynamic loop delay
-unsigned long current_delay = BASE_DELAY_MS; 
+unsigned long seq = 0;    // Sequence number for guaranteed delivery
+int qos = 1;              // 0 = best effort, 1 = guaranteed delivery
 bool fs_is_ready = false; // Global flag to track successful LittleFS mount state
 
 // Forward declaration
 bool sendWithQoS(const String &payload, unsigned long current_seq);
 void logDataToFile(const String &payload);
 void transmitStoredData();
-void reconnectMqtt();
-// FIX: Updated signature to accept String payload for convenience, converting inside the function
-void publishMessage(const char *topic, const String &payload, boolean retained);
 
 // Function to wait for an acknowledgement from the UDP server
 bool waitForAck(unsigned long mySeq, const char *myId)
@@ -80,13 +70,14 @@ bool waitForAck(unsigned long mySeq, const char *myId)
             int len = udp.read(incoming, sizeof(incoming) - 1);
             incoming[len] = 0;
 
-            // Use JsonDocument (best practice, though original used StaticJsonDocument)
-            // Note: Since this block was not causing the error, I'm keeping the original type for minimal change.
-            StaticJsonDocument<128> doc;
+            // Using JsonDocument (best practice)
+            JsonDocument doc;
             DeserializationError error = deserializeJson(doc, incoming);
 
             if (error)
             {
+                // Serial.print("ACK Parsing failed: ");
+                // Serial.println(error.c_str());
                 continue;
             }
 
@@ -98,6 +89,7 @@ bool waitForAck(unsigned long mySeq, const char *myId)
                 strcmp(id, myId) == 0 &&
                 seq == mySeq)
             {
+
                 Serial.println("ACK received!");
                 return true;
             }
@@ -124,14 +116,15 @@ bool sendWithQoS(const String &payload, unsigned long current_seq)
 
     do
     {
-        // 1. Send UDP packet (using const char* IP)
+        // 1. Send UDP packet using the IPAddress object
         udp.beginPacket(udp_server_ip, udp_port);
         udp.print(payload);
         udp.endPacket();
 
-        Serial.print("Sent UDP (Seq ");
+        Serial.print("Sent (Seq ");
         Serial.print(current_seq);
         Serial.print("): ");
+        // Only print first 60 chars of payload for logs
         Serial.println(payload.substring(0, min((int)payload.length(), 60)) + "...");
 
         // 2. Wait for ACK (Error Handling)
@@ -163,6 +156,7 @@ bool sendWithQoS(const String &payload, unsigned long current_seq)
         }
         else
         {
+            // QoS 0 is always "delivered" instantly
             delivered = true;
         }
 
@@ -217,8 +211,6 @@ void transmitStoredData()
     if (!file)
     {
         Serial.println("No existing telemetry log file found.");
-        // If file doesn't exist, backlog is zero, reset delay
-        current_delay = BASE_DELAY_MS; 
         return;
     }
 
@@ -261,37 +253,6 @@ void transmitStoredData()
     }
 
     file.close();
-    
-    // --- ADAPTIVE THROTTLING LOGIC ---
-    int backlog_count = failed_messages.size();
-
-    if (backlog_count > THROTTLING_THRESHOLD) {
-        // Calculate new delay based on backlog size
-        unsigned long throttle_increase = (backlog_count - THROTTLING_THRESHOLD) * THROTTLING_FACTOR;
-        current_delay = BASE_DELAY_MS + throttle_increase;
-        
-        // Cap the delay
-        if (current_delay > MAX_DELAY_MS) {
-            current_delay = MAX_DELAY_MS;
-        }
-        
-        Serial.print("CONGESTION DETECTED: Backlog=");
-        Serial.print(backlog_count);
-        Serial.print(". New generation delay: ");
-        Serial.print(current_delay / 1000);
-        Serial.println("s.");
-
-    } else {
-        // If backlog is low, reset to base delay
-        current_delay = BASE_DELAY_MS;
-        if (backlog_count > 0) {
-            Serial.print("Backlog clearing: ");
-            Serial.print(backlog_count);
-            Serial.println(" remaining. Resetting delay.");
-        }
-    }
-    // --- END ADAPTIVE THROTTLING ---
-
 
     // ----------------------------------------------------------------------
     // Rolling Window Logic: Rewrite the log file with only the failed messages
@@ -299,7 +260,10 @@ void transmitStoredData()
 
     if (count > 0)
     {
-        // Only rewrite if there were items to process
+        Serial.print("Finished processing ");
+        Serial.print(count);
+        Serial.println(" stored messages.");
+
         if (failed_messages.empty())
         {
             // All messages sent successfully, delete the file.
@@ -364,19 +328,15 @@ void callback(char *topic, byte *payload, unsigned int length)
     for (int i = 0; i < length; i++)
         Serial.print((char)payload[i]);
     Serial.println();
-    // Add logic here to process received commands
 }
 
 //------------------------------
-void publishMessage(const char *topic, const String &payload, boolean retained)
+void publishMessage(const char *topic, const char *payload, boolean retained)
 {
-    // Use payload.c_str() for publishing
-    if (client.publish(topic, payload.c_str(), retained))
+    if (client.publish(topic, payload, retained))
     {
         Serial.println("JSON published to " + String(topic));
-    } else {
-        Serial.print("MQTT publish failed for topic: ");
-        Serial.println(topic);
+        Serial.println(payload);
     }
 }
 void setup()
@@ -483,7 +443,6 @@ void loop()
     doc["temperature"] = temp;
     doc["relativeHumidity"] = hum;
     doc["dateObserved"] = millis(); // Using internal time for simplicity
-    doc["status"] = "OPERATIONAL"; // Simple QoS Flag
     doc["qos"] = qos;
     doc["seq"] = seq;
 
@@ -510,5 +469,5 @@ void loop()
     // packet retains its sequence number and will be resent later.
     seq++;
 
-    delay(current_delay); // Use adaptive delay
+    delay(5000); // Wait 5 seconds before the next observation
 }
